@@ -383,6 +383,9 @@ app.use((err, _req, res, _next) => {
 
 /* ============================= サーバ起動 ============================= */
 
-app.listen(3000, '0.0.0.0', () => {
-  console.log('Server started on 0.0.0.0:3000');
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server started on ${PORT}`);
 });
+
