@@ -29,7 +29,7 @@ app.use((req, _res, next) => {
 /* ============================= インメモリデータ ============================= */
 // 本番ではPrisma/DBへ移行予定
 
-const users = []; // { user_id, login_id, password_hash, student_name, parent_name, school_name, grade, email, registered_at }
+const users = []; // { user_id, password_hash, student_name, parent_name, school_name, grade, email, registered_at }
 let userSeq = 1;
 
 const lectures = [
@@ -135,35 +135,35 @@ app.post('/user', (req, res) => {
 // 仮登録（bcryptjsでハッシュ化）
 app.post('/register', async (req, res, next) => {
   try {
-    const {
-      student_name,
-      parent_name,
-      school_name,
-      login_id,
-      password,
-      grade,
-      email,
-    } = req.body;
+    console.log('=== REGISTER RAW BODY ===');
+    console.log(req.body);
+    console.log('grade type:', typeof req.body.grade, req.body.grade);
+    const { student_name, parent_name, school_name, password, grade, email } =
+      req.body;
 
     if (
       !student_name ||
       !parent_name ||
       !school_name ||
-      !login_id ||
       !password ||
-      !grade
+      email == null ||
+      grade == null
     ) {
       return res.status(400).json({ error: '必須項目不足' });
     }
-    if (users.find((u) => u.login_id === login_id)) {
-      return res.status(409).json({ error: 'login_idが登録済み' });
+    if (users.find((u) => u.email === email)) {
+      return res.status(409).json({ error: '登録済みです' });
+    }
+
+    const gradeNum = Number(grade);
+    if (Number.isNaN(gradeNum)) {
+      return res.status(400).json({ error: '学年が不正です' });
     }
 
     const password_hash = await bcrypt.hash(password, 10);
 
     const user = {
       user_id: userSeq++,
-      login_id,
       password_hash,
       student_name,
       parent_name,
@@ -172,11 +172,22 @@ app.post('/register', async (req, res, next) => {
       email: email || '',
       registered_at: new Date(),
     };
-    users.push(user);
+    users.push({
+      user_id: userSeq++,
+      email,
+      password_hash,
+      student_name,
+      parent_name,
+      school_name,
+      grade: gradeNum,
+      is_verified: false,
+      verify_token: crypto.randomUUID(),
+      created_at: new Date(),
+    });
 
     res.json({
-      status: 'success',
-      message: '仮登録が完了しました。確認コードを送信しました。',
+      status: 'pending_verification',
+      message: '確認メールを送信しました',
     });
   } catch (e) {
     next(e);
@@ -186,15 +197,28 @@ app.post('/register', async (req, res, next) => {
 // ログイン（JWT発行）
 app.post('/login', async (req, res, next) => {
   try {
-    const { login_id, password } = req.body;
-    const u = users.find((x) => x.login_id === login_id);
-    if (!u) return res.status(404).json({ error: 'login_idが存在しない' });
+    console.log('=== LOGIN BODY ===', req.body);
+
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: '必須項目不足' });
+    }
+
+    const u = users.find((x) => x.email === email);
+    if (!u) return res.status(404).json({ error: 'ユーザーが存在しません' });
 
     const ok = await bcrypt.compare(password, u.password_hash);
     if (!ok) return res.status(401).json({ error: 'パスワード不正' });
 
     const token = signToken({ sub: u.user_id, role: 'student' });
-    res.json({ status: 'success', token, role: 'student', user_id: u.user_id });
+
+    res.json({
+      status: 'success',
+      token,
+      role: 'student',
+      user_id: u.user_id,
+    });
   } catch (e) {
     next(e);
   }
@@ -383,9 +407,6 @@ app.use((err, _req, res, _next) => {
 
 /* ============================= サーバ起動 ============================= */
 
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server started on ${PORT}`);
+app.listen(3000, '0.0.0.0', () => {
+  console.log('Server started on 0.0.0.0:3000');
 });
-
