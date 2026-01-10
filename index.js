@@ -29,7 +29,7 @@ app.use((req, _res, next) => {
 /* ============================= インメモリデータ ============================= */
 // 本番ではPrisma/DBへ移行予定
 
-const users = []; // { user_id, password_hash, student_name, parent_name, school_name, grade, email, registered_at }
+const users = []; // { user_id, password_hash, student_name, parent_name, school_name, grade, email,verify_code, email_verified,verify_expires_at, registered_at }
 let userSeq = 1;
 
 const lectures = [
@@ -91,6 +91,11 @@ function shuffle(arr) {
   return a;
 }
 
+function generateVerifyCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+
 /* ============================= JWT ============================= */
 
 // 環境変数が無ければ開発用デフォルト
@@ -135,94 +140,112 @@ app.post('/user', (req, res) => {
 // 仮登録（bcryptjsでハッシュ化）
 app.post('/register', async (req, res, next) => {
   try {
-    console.log('=== REGISTER RAW BODY ===');
-    console.log(req.body);
-    console.log('grade type:', typeof req.body.grade, req.body.grade);
-    const { student_name, parent_name, school_name, password, grade, email } =
-      req.body;
+    const {
+      student_name,
+      parent_name,
+      school_name,
+      password,
+      grade,
+      email,
+    } = req.body;
 
     if (
       !student_name ||
       !parent_name ||
       !school_name ||
       !password ||
-      email == null ||
-      grade == null
+      !grade ||
+      !email
     ) {
       return res.status(400).json({ error: '必須項目不足' });
     }
+
     if (users.find((u) => u.email === email)) {
       return res.status(409).json({ error: '登録済みです' });
     }
 
-    const gradeNum = Number(grade);
-    if (Number.isNaN(gradeNum)) {
-      return res.status(400).json({ error: '学年が不正です' });
-    }
-
     const password_hash = await bcrypt.hash(password, 10);
+    const verify_code = generateVerifyCode();
 
     const user = {
       user_id: userSeq++,
-      password_hash,
       student_name,
       parent_name,
       school_name,
       grade,
-      email: email || '',
-      registered_at: new Date(),
-    };
-    users.push({
-      user_id: userSeq++,
       email,
       password_hash,
-      student_name,
-      parent_name,
-      school_name,
-      grade: gradeNum,
-      is_verified: false,
-      verify_token: crypto.randomUUID(),
-      created_at: new Date(),
-    });
 
-    res.json({
-      status: 'pending_verification',
-      message: '確認メールを送信しました',
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+      verify_code,
+      email_verified: false,
+      verify_expires_at: new Date(Date.now() + 10 * 60 * 1000), // 10分
 
-// ログイン（JWT発行）
-app.post('/login', async (req, res, next) => {
-  try {
-    console.log('=== LOGIN BODY ===', req.body);
+      registered_at: new Date(),
+    };
 
-    const { email, password } = req.body;
+    users.push(user);
 
-    if (!email || !password) {
-      return res.status(400).json({ error: '必須項目不足' });
-    }
-
-    const u = users.find((x) => x.email === email);
-    if (!u) return res.status(404).json({ error: 'ユーザーが存在しません' });
-
-    const ok = await bcrypt.compare(password, u.password_hash);
-    if (!ok) return res.status(401).json({ error: 'パスワード不正' });
-
-    const token = signToken({ sub: u.user_id, role: 'student' });
+    // 🔽 今はダミーでログに出す
+    console.log('📧 VERIFY CODE:', email, verify_code);
 
     res.json({
       status: 'success',
-      token,
-      role: 'student',
-      user_id: u.user_id,
+      message: '確認コードを送信しました',
     });
   } catch (e) {
     next(e);
   }
 });
+// メール認証
+app.post('/verify', (req, res) => {
+  const { email, code } = req.body;
+
+  if (!email || !code) {
+    return res.status(400).json({ error: '不足しています' });
+  }
+
+  const user = users.find((u) => u.email === email);
+  if (!user) {
+    return res.status(404).json({ error: 'ユーザーが存在しません' });
+  }
+
+  if (user.email_verified) {
+    return res.json({ message: 'すでに確認済みです' });
+  }
+
+  if (user.verify_code !== code) {
+    return res.status(400).json({ error: '確認コードが違います' });
+  }
+
+  if (new Date() > user.verify_expires_at) {
+    return res.status(400).json({ error: '確認コードの期限切れ' });
+  }
+
+  user.email_verified = true;
+  user.verify_code = null;
+
+  res.json({ status: 'success', message: 'メール確認完了' });
+});
+
+
+// ログイン（JWT発行）
+app.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  const u = users.find((x) => x.email === email);
+  if (!u) return res.status(404).json({ error: '存在しません' });
+
+  if (!u.email_verified) {
+    return res.status(403).json({ error: 'メール確認が必要です' });
+  }
+
+  const ok = await bcrypt.compare(password, u.password_hash);
+  if (!ok) return res.status(401).json({ error: 'パスワード不正' });
+
+  const token = signToken({ sub: u.user_id, role: 'student' });
+  res.json({ token, role: 'student', user_id: u.user_id });
+});
+
 
 /* ============================= 一般API（講座） ============================= */
 
