@@ -25,6 +25,14 @@ app.use((req, _res, next) => {
   console.log(`[REQ] ${req.method} ${req.url}`);
   next();
 });
+// 申し込みログ
+app.post('/entry', (req, res) => {
+  console.log('=== ENTRY LOG ===');
+  console.log(req.body);
+
+  res.json({ message: 'entry received' });
+});
+
 
 /* ============================= インメモリデータ ============================= */
 // 本番ではPrisma/DBへ移行予定
