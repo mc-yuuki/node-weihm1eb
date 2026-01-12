@@ -33,6 +33,30 @@ app.post('/entry', (req, res) => {
   res.json({ message: 'entry received' });
 });
 
+// 管理者：応募ログ一覧
+app.get('/admin/applications', auth('admin'), (_req, res) => {
+  const logs = applications.map((a) => {
+    const user = users.find((u) => u.user_id === a.user_id);
+    const session = sessions.find((s) => s.session_id === a.session_id);
+    const lecture = session
+      ? lectures.find((l) => l.lecture_id === session.lecture_id)
+      : null;
+
+    return {
+      application_id: a.application_id,
+      student_name: user?.student_name ?? '不明',
+      email: user?.email ?? '不明',
+      lecture_name: lecture?.title ?? '不明',
+      date: session
+        ? session.start_time.toLocaleString('ja-JP')
+        : null,
+      status: a.status,
+    };
+  });
+
+  res.json(logs);
+});
+
 
 /* ============================= インメモリデータ ============================= */
 // 本番ではPrisma/DBへ移行予定
