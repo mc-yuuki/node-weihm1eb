@@ -127,6 +127,10 @@ function generateVerifyCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+function isLotteryDone() {
+  return applications.some(a => a.status !== 'applied');
+}
+
 
 /* ============================= JWT ============================= */
 
@@ -401,6 +405,11 @@ app.get('/applications/mine', auth('student'), (req, res) => {
 
 /* ============================= 管理API（JWT: admin） ============================= */
 
+//抽選状態確認
+app.get('/admin/lottery/status', auth('admin'), (_req, res) => {
+  res.json({ done: isLotteryDone() });
+});
+
 // 管理者ログイン（スタブ：固定ID/パスでJWT発行）
 app.post('/admin/login', (req, res) => {
   const { username, password } = req.body;
@@ -414,16 +423,24 @@ app.post('/admin/login', (req, res) => {
 
 // 抽選実行（締切後のみ）
 app.post('/admin/lottery', auth('admin'), (_req, res) => {
+  if (isLotteryDone()) {
+    return res.status(400).json({ error: 'すでに抽選済みです' });
+  }
+
   const now = new Date();
   const results = [];
+
   for (const s of sessions) {
+    // 締切前は対象外
     if (now < s.deadline) continue;
 
     const appl = applications.filter(
       (a) => a.session_id === s.session_id && a.status === 'applied'
     );
+
     if (appl.length === 0) continue;
 
+    // 定員以内 → 全員当選
     if (appl.length <= s.capacity) {
       for (const a of appl) {
         a.status = 'confirmed';
@@ -432,6 +449,7 @@ app.post('/admin/lottery', auth('admin'), (_req, res) => {
       continue;
     }
 
+    // 抽選
     const shuffled = shuffle(appl);
     const winners = shuffled.slice(0, s.capacity);
     const losers = shuffled.slice(s.capacity);
@@ -441,12 +459,18 @@ app.post('/admin/lottery', auth('admin'), (_req, res) => {
       results.push({ application_id: w.application_id, result: 'win' });
     }
     for (const l of losers) {
-      l.status = 'waitlisted';
+      l.status = 'rejected';
       results.push({ application_id: l.application_id, result: 'lose' });
     }
   }
-  res.json({ status: 'done', results });
+
+  res.json({
+    status: 'done',
+    message: '抽選が完了しました',
+    results,
+  });
 });
+
 
 /* ============================= エラーハンドラ ============================= */
 
